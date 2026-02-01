@@ -1,10 +1,12 @@
 # ui_builder.py
-# Builds the Fusion command UI (groups, descriptions, tooltips) and wires Execute/Destroy.
+# Builds the Fusion command UI (groups, descriptions, tooltips)
+# + optional Presets dropdown (applies to Flow settings)
 
 import adsk.core
 import traceback
 
 import config
+import presets
 from util import set_tip
 
 
@@ -128,6 +130,23 @@ class CommandCreatedHandler(adsk.core.CommandCreatedEventHandler):
             # FLOW
             # ----------------------------
             d_flow = config.DEFAULTS_FLOW
+
+            # Preset dropdown
+            preset_dd = flow.addDropDownCommandInput(
+                "presetPick",
+                "Preset",
+                adsk.core.DropDownStyles.TextListDropDownStyle
+            )
+            for name in presets.preset_names():
+                preset_dd.listItems.add(name, name == presets.PRESET_LABEL_NONE)
+
+            set_tip(
+                preset_dd,
+                "Quick starting points",
+                "Pick a preset to auto-fill the Flow settings.\nYou can still tweak after applying."
+            )
+
+            flow.addSeparatorCommandInput("flowPresetSep")
 
             flow.addTextBoxCommandInput(
                 "flowDescription",
@@ -298,6 +317,11 @@ class CommandCreatedHandler(adsk.core.CommandCreatedEventHandler):
             cmd.execute.add(on_execute)
             self.handlers.append(on_execute)
 
+            # Preset apply
+            on_changed = InputChangedHandler()
+            cmd.inputChanged.add(on_changed)
+            self.handlers.append(on_changed)
+
             on_destroy = CommandDestroyHandler()
             cmd.destroy.add(on_destroy)
             self.handlers.append(on_destroy)
@@ -313,13 +337,25 @@ class CommandExecuteHandler(adsk.core.CommandEventHandler):
         self.generator_module = generator_module
 
     def notify(self, args):
-        # Delegate to generator
         self.generator_module.execute(args)
+
+
+class InputChangedHandler(adsk.core.InputChangedEventHandler):
+    def notify(self, args):
+        try:
+            changed = args.input
+            if not changed:
+                return
+
+            if changed.id == "presetPick":
+                presets.apply_preset_to_inputs(args.inputs, changed.selectedItem.name)
+        except:
+            # Avoid modal errors while dragging sliders/inputs
+            pass
 
 
 class CommandDestroyHandler(adsk.core.CommandEventHandler):
     def notify(self, args):
-        # End script run
         try:
             adsk.terminate()
         except:
