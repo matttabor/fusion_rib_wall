@@ -1,15 +1,10 @@
 # Centralized defaults, limits, and presets for Organic Flow Ribs
 
-# ----------------------------
-# Metadata / Naming
-# ----------------------------
-
 SCRIPT_PREFIX = "OrganicFlowRibs_"
 
 # ----------------------------
 # Main geometry defaults
 # ----------------------------
-
 DEFAULTS_MAIN = {
     "rib_count": 30,
     "rib_length_in": 48.0,
@@ -22,7 +17,6 @@ DEFAULTS_MAIN = {
 # ----------------------------
 # Flow / surface defaults
 # ----------------------------
-
 DEFAULTS_FLOW = {
     "seed": 12345,
 
@@ -53,7 +47,6 @@ DEFAULTS_FLOW = {
 # ----------------------------
 # Quality / smoothing defaults
 # ----------------------------
-
 DEFAULTS_QUALITY = {
     "samples": 420,
     "smooth_passes": 2,
@@ -62,7 +55,6 @@ DEFAULTS_QUALITY = {
 # ----------------------------
 # Tabs (tenons) defaults
 # ----------------------------
-
 DEFAULTS_TABS = {
     "add_tabs": True,
     "tab_width_in": 4.0,
@@ -73,7 +65,6 @@ DEFAULTS_TABS = {
 # ----------------------------
 # Validation limits
 # ----------------------------
-
 LIMITS = {
     "rib_count": (1, 600),
     "rib_length_in": (1.0, 144.0),
@@ -103,7 +94,6 @@ LIMITS = {
 # ----------------------------
 # Presets (optional, future UI use)
 # ----------------------------
-
 PRESETS = {
     "Clean Dunes": {
         "randomness": 0.25,

@@ -1,5 +1,4 @@
 # geometry.py
-# Surface-first heightfield + rib sketch/profile + tabs + extrusion + preview layout
 
 import adsk.core
 import adsk.fusion
