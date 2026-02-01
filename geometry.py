@@ -184,133 +184,134 @@ def generate_flow_ribs(
 
         # Clamp to usable profile range
         return max(0.0, min(rib_height_in, z_profile))
+    try:
+        # ----------------------------
+        # Build each rib as its own component inside the container
+        # ----------------------------
+        for i in range(rib_count):
+            progress.progressValue = i
+            adsk.doEvents()
+            rib_occ = rib_occs.addNewComponent(adsk.core.Matrix3D.create())
+            rib_comp = rib_occ.component
+            rib_comp.name = f"Rib_{i+1:02d}"
 
-    # ----------------------------
-    # Build each rib as its own component inside the container
-    # ----------------------------
-    for i in range(rib_count):
-        progress.progressValue = i
-        adsk.doEvents()
-        rib_occ = rib_occs.addNewComponent(adsk.core.Matrix3D.create())
-        rib_comp = rib_occ.component
-        rib_comp.name = f"Rib_{i+1:02d}"
+            # Sketch on XZ plane so thickness extrudes along +Y
+            sketch = rib_comp.sketches.add(rib_comp.xZConstructionPlane)
+            curves = sketch.sketchCurves
+            lines = curves.sketchLines
+            splines = curves.sketchFittedSplines
 
-        # Sketch on XZ plane so thickness extrudes along +Y
-        sketch = rib_comp.sketches.add(rib_comp.xZConstructionPlane)
-        curves = sketch.sketchCurves
-        lines = curves.sketchLines
-        splines = curves.sketchFittedSplines
+            y_in = i * pitch_in
 
-        y_in = i * pitch_in
+            # Sample profile
+            x_vals = []
+            z_vals = []
+            for s in range(samples + 1):
+                x_in = rib_length_in * (s / samples)
+                x_vals.append(x_in)
+                z_vals.append(height_at(x_in, y_in))
 
-        # Sample profile
-        x_vals = []
-        z_vals = []
-        for s in range(samples + 1):
-            x_in = rib_length_in * (s / samples)
-            x_vals.append(x_in)
-            z_vals.append(height_at(x_in, y_in))
+            # Smooth the sampled profile
+            z_vals = smooth_series(z_vals, passes=smooth_passes)
 
-        # Smooth the sampled profile
-        z_vals = smooth_series(z_vals, passes=smooth_passes)
+            # Create spline using fit points
+            fit_pts = adsk.core.ObjectCollection.create()
+            for x_in, z_in in zip(x_vals, z_vals):
+                fit_pts.add(adsk.core.Point3D.create(cm(x_in), cm(z_in), 0))
 
-        # Create spline using fit points
-        fit_pts = adsk.core.ObjectCollection.create()
-        for x_in, z_in in zip(x_vals, z_vals):
-            fit_pts.add(adsk.core.Point3D.create(cm(x_in), cm(z_in), 0))
+            splines.add(fit_pts)
 
-        splines.add(fit_pts)
+            # Close profile:
+            # Right vertical down to baseline
+            x_right = rib_length_in
+            z_right = z_vals[-1]
+            lines.addByTwoPoints(
+                adsk.core.Point3D.create(cm(x_right), cm(z_right), 0),
+                adsk.core.Point3D.create(cm(x_right), cm(0.0), 0)
+            )
 
-        # Close profile:
-        # Right vertical down to baseline
-        x_right = rib_length_in
-        z_right = z_vals[-1]
-        lines.addByTwoPoints(
-            adsk.core.Point3D.create(cm(x_right), cm(z_right), 0),
-            adsk.core.Point3D.create(cm(x_right), cm(0.0), 0)
-        )
+            # Baseline leftwards, with optional tabs that dip down
+            cur_x = rib_length_in
+            baseline_z = 0.0
+            tab_bottom_z = -tab_height_in
 
-        # Baseline leftwards, with optional tabs that dip down
-        cur_x = rib_length_in
-        baseline_z = 0.0
-        tab_bottom_z = -tab_height_in
+            p = adsk.core.Point3D.create(cm(cur_x), cm(baseline_z), 0)
 
-        p = adsk.core.Point3D.create(cm(cur_x), cm(baseline_z), 0)
+            if add_tabs and len(tab_spans) > 0:
+                # tab_spans are sorted right->left
+                for (t0, t1) in tab_spans:
+                    # Move baseline from cur_x to t1
+                    if cur_x > t1:
+                        p2 = adsk.core.Point3D.create(cm(t1), cm(baseline_z), 0)
+                        lines.addByTwoPoints(p, p2)
+                        p = p2
+                        cur_x = t1
 
-        if add_tabs and len(tab_spans) > 0:
-            # tab_spans are sorted right->left
-            for (t0, t1) in tab_spans:
-                # Move baseline from cur_x to t1
-                if cur_x > t1:
-                    p2 = adsk.core.Point3D.create(cm(t1), cm(baseline_z), 0)
+                    # Down
+                    p2 = adsk.core.Point3D.create(cm(cur_x), cm(tab_bottom_z), 0)
                     lines.addByTwoPoints(p, p2)
                     p = p2
-                    cur_x = t1
 
-                # Down
-                p2 = adsk.core.Point3D.create(cm(cur_x), cm(tab_bottom_z), 0)
-                lines.addByTwoPoints(p, p2)
-                p = p2
+                    # Left along bottom of tab
+                    p2 = adsk.core.Point3D.create(cm(t0), cm(tab_bottom_z), 0)
+                    lines.addByTwoPoints(p, p2)
+                    p = p2
+                    cur_x = t0
 
-                # Left along bottom of tab
-                p2 = adsk.core.Point3D.create(cm(t0), cm(tab_bottom_z), 0)
-                lines.addByTwoPoints(p, p2)
-                p = p2
-                cur_x = t0
+                    # Up to baseline
+                    p2 = adsk.core.Point3D.create(cm(cur_x), cm(baseline_z), 0)
+                    lines.addByTwoPoints(p, p2)
+                    p = p2
 
-                # Up to baseline
-                p2 = adsk.core.Point3D.create(cm(cur_x), cm(baseline_z), 0)
-                lines.addByTwoPoints(p, p2)
-                p = p2
-
-            # Finish baseline to x=0
-            if cur_x > 0.0:
+                # Finish baseline to x=0
+                if cur_x > 0.0:
+                    p2 = adsk.core.Point3D.create(cm(0.0), cm(baseline_z), 0)
+                    lines.addByTwoPoints(p, p2)
+                    p = p2
+                    cur_x = 0.0
+            else:
+                # Straight baseline
                 p2 = adsk.core.Point3D.create(cm(0.0), cm(baseline_z), 0)
                 lines.addByTwoPoints(p, p2)
                 p = p2
                 cur_x = 0.0
-        else:
-            # Straight baseline
-            p2 = adsk.core.Point3D.create(cm(0.0), cm(baseline_z), 0)
-            lines.addByTwoPoints(p, p2)
-            p = p2
-            cur_x = 0.0
 
-        # Left vertical up to start height (close)
-        z_left = z_vals[0]
-        lines.addByTwoPoints(
-            adsk.core.Point3D.create(cm(0.0), cm(baseline_z), 0),
-            adsk.core.Point3D.create(cm(0.0), cm(z_left), 0)
-        )
-
-        # Ensure we have a profile
-        if sketch.profiles.count == 0:
-            ui.messageBox(
-                f"Profile failed on rib {i+1}.\n\n"
-                "Try:\n"
-                "- Lower Base amplitude / Detail\n"
-                "- Increase Smoothness\n"
-                "- Reduce Tab height/width\n"
-                "- Increase samples (then keep smoothing passes modest)"
+            # Left vertical up to start height (close)
+            z_left = z_vals[0]
+            lines.addByTwoPoints(
+                adsk.core.Point3D.create(cm(0.0), cm(baseline_z), 0),
+                adsk.core.Point3D.create(cm(0.0), cm(z_left), 0)
             )
-            return
 
-        prof = sketch.profiles.item(0)
+            # Ensure we have a profile
+            if sketch.profiles.count == 0:
+                ui.messageBox(
+                    f"Profile failed on rib {i+1}.\n\n"
+                    "Try:\n"
+                    "- Lower Base amplitude / Detail\n"
+                    "- Increase Smoothness\n"
+                    "- Reduce Tab height/width\n"
+                    "- Increase samples (then keep smoothing passes modest)"
+                )
+                return
 
-        # Extrude thickness along +Y
-        extrudes = rib_comp.features.extrudeFeatures
-        ext_in = extrudes.createInput(prof, adsk.fusion.FeatureOperations.NewBodyFeatureOperation)
-        ext_in.setDistanceExtent(False, adsk.core.ValueInput.createByString(f"{rib_thickness_in} in"))
-        extrudes.add(ext_in)
+            prof = sketch.profiles.item(0)
 
-        # Place ribs for preview layout
-        m = adsk.core.Matrix3D.create()
-        if layout_along_y:
-            m.translation = adsk.core.Vector3D.create(0, cm(i * pitch_in), 0)
-        else:
-            m.translation = adsk.core.Vector3D.create(cm(i * pitch_in), 0, 0)
-        rib_occ.transform = m
-    progress.hide()
+            # Extrude thickness along +Y
+            extrudes = rib_comp.features.extrudeFeatures
+            ext_in = extrudes.createInput(prof, adsk.fusion.FeatureOperations.NewBodyFeatureOperation)
+            ext_in.setDistanceExtent(False, adsk.core.ValueInput.createByString(f"{rib_thickness_in} in"))
+            extrudes.add(ext_in)
+
+            # Place ribs for preview layout
+            m = adsk.core.Matrix3D.create()
+            if layout_along_y:
+                m.translation = adsk.core.Vector3D.create(0, cm(i * pitch_in), 0)
+            else:
+                m.translation = adsk.core.Vector3D.create(cm(i * pitch_in), 0, 0)
+            rib_occ.transform = m
+    finally:
+        progress.hide()
     
     ui.messageBox(
         "Flow ribs generated.\n\n"

@@ -355,7 +355,6 @@ class InputChangedHandler(adsk.core.InputChangedEventHandler):
             changed = args.input
             if not changed:
                 return
-
             if changed.id == "presetPick":
                 presets.apply_preset_to_inputs(args.inputs, changed.selectedItem.name)
         except:

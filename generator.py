@@ -1,6 +1,7 @@
 # generator.py
 # Reads dialog inputs and generates the model by calling geometry.py
 
+import math
 import adsk.core
 import adsk.fusion
 import traceback
@@ -85,36 +86,47 @@ def execute(args):
         # --- Housekeeping ---
         delete_old = _bool(inputs, "deleteOld")
 
-        ui.messageBox("Starting geometry… ✅")
+        root = _get_root_component()
+        name_prefix = "OrganicFlowRibs_"
 
+        flow_angle_deg = float(inputs.itemById("flowAngleDeg").value)
+        flow_angle_rad = math.radians(flow_angle_deg)
         # Call into geometry.py
         # IMPORTANT: your geometry.py needs to provide a function with this signature.
         # If your function name differs, we'll adjust after you paste geometry.py.
-        geometry.generate(
+        geometry.generate_flow_ribs(
+            root=root,
+            name_prefix=name_prefix,
+
+            seed=seed,
+
             rib_count=rib_count,
             rib_length_in=rib_length_in,
             rib_height_in=rib_height_in,
             rib_thickness_in=rib_thickness_in,
             gap_between_ribs_in=gap_between_ribs_in,
             layout_along_y=layout_along_y,
-            seed=seed,
+
             randomness=randomness,
             wildness=wildness,
             smoothness=smoothness,
+
             base_amplitude_in=base_amplitude_in,
             bend_scale_in=bend_scale_in,
-            flow_angle_deg=flow_angle_deg,
+            flow_angle_rad=flow_angle_rad,
             flow_strength=flow_strength,
             detail=detail,
+
             use_mass=use_mass,
             mass_strength=mass_strength,
+
             samples=samples,
             smooth_passes=smooth_passes,
+
             add_tabs=add_tabs,
             tab_width_in=tab_width_in,
             tab_height_in=tab_height_in,
-            tab_centers_in=tab_centers_in,
-            delete_old=delete_old,
+            tab_centers_in=tab_centers_in
         )
 
         ui.messageBox("Done ✅")
@@ -123,3 +135,10 @@ def execute(args):
         if ui:
             ui.messageBox("Generator failed:\n" + traceback.format_exc())
         print("Generator failed:\n", traceback.format_exc())
+
+def _get_root_component() -> adsk.fusion.Component:
+    app = adsk.core.Application.get()
+    design = adsk.fusion.Design.cast(app.activeProduct)
+    if not design:
+        raise RuntimeError("No active Fusion design")
+    return design.rootComponent
