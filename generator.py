@@ -129,8 +129,6 @@ def execute(args):
             tab_centers_in=tab_centers_in
         )
 
-        ui.messageBox("Done ✅")
-
     except:
         if ui:
             ui.messageBox("Generator failed:\n" + traceback.format_exc())

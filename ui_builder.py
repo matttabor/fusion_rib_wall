@@ -342,7 +342,6 @@ class CommandExecuteHandler(adsk.core.CommandEventHandler):
         ui = app.userInterface
         try:
             self.generator_module.execute(args)
-            ui.messageBox("GENERATOR RETURNED ✅")
         except:
             import traceback
             ui.messageBox("EXECUTE FAILED:\n" + traceback.format_exc())
