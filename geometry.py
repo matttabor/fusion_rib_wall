@@ -44,6 +44,9 @@ def generate_flow_ribs(
     tab_centers_in
 ):
     ui = adsk.core.Application.get().userInterface
+    progress = ui.createProgressDialog()
+    progress.isBackgroundTranslucent = False
+    progress.show("OrganicFlowRibs", "Generating rib %v of %m", 0, rib_count, 0)
 
     # ----------------------------
     # Container component
@@ -186,6 +189,8 @@ def generate_flow_ribs(
     # Build each rib as its own component inside the container
     # ----------------------------
     for i in range(rib_count):
+        progress.progressValue = i
+        adsk.doEvents()
         rib_occ = rib_occs.addNewComponent(adsk.core.Matrix3D.create())
         rib_comp = rib_occ.component
         rib_comp.name = f"Rib_{i+1:02d}"
@@ -305,7 +310,8 @@ def generate_flow_ribs(
         else:
             m.translation = adsk.core.Vector3D.create(cm(i * pitch_in), 0, 0)
         rib_occ.transform = m
-
+    progress.hide()
+    
     ui.messageBox(
         "Flow ribs generated.\n\n"
         f"Seed: {seed}\n"

@@ -45,7 +45,7 @@ class CommandCreatedHandler(adsk.core.CommandCreatedEventHandler):
         ui = None
         try:
             app = adsk.core.Application.get()
-            ui = app.userInterface
+            ui = app.userInterface        
 
             cmd = args.command
             inputs = cmd.commandInputs
@@ -325,10 +325,11 @@ class CommandCreatedHandler(adsk.core.CommandCreatedEventHandler):
             on_destroy = CommandDestroyHandler()
             cmd.destroy.add(on_destroy)
             self.handlers.append(on_destroy)
-
         except:
             if ui:
-                ui.messageBox("UI build failed:\n" + traceback.format_exc())
+                import traceback
+                ui.messageBox("EXECUTE FAILED:\n" + traceback.format_exc())
+                print("EXECUTE FAILED:\n" + traceback.format_exc())
 
 
 class CommandExecuteHandler(adsk.core.CommandEventHandler):
@@ -337,8 +338,16 @@ class CommandExecuteHandler(adsk.core.CommandEventHandler):
         self.generator_module = generator_module
 
     def notify(self, args):
-        self.generator_module.execute(args)
-
+        app = adsk.core.Application.get()
+        ui = app.userInterface
+        try:
+            self.generator_module.execute(args)
+            ui.messageBox("GENERATOR RETURNED ✅")
+        except:
+            import traceback
+            ui.messageBox("EXECUTE FAILED:\n" + traceback.format_exc())
+            print("EXECUTE FAILED:\n", traceback.format_exc())
+            
 
 class InputChangedHandler(adsk.core.InputChangedEventHandler):
     def notify(self, args):
@@ -355,8 +364,6 @@ class InputChangedHandler(adsk.core.InputChangedEventHandler):
 
 
 class CommandDestroyHandler(adsk.core.CommandEventHandler):
-    def notify(self, args):
-        try:
-            adsk.terminate()
-        except:
-            pass
+     def notify(self, args):
+        # Don't terminate here; it can kill execute.
+        pass

@@ -1,4 +1,3 @@
-# config.py
 # Centralized defaults, limits, and presets for Organic Flow Ribs
 
 # ----------------------------

@@ -1,17 +1,17 @@
 # OrganicFlowRibs.py
 # Entry point for Fusion 360 Script
-#
-# Folder layout (all files in the same folder):
-#   OrganicFlowRibs.py
-#   config.py
-#   util.py
-#   ui_builder.py
-#   generator.py
-#   geometry.py
 
 import adsk.core
 import traceback
+import os
+import sys
 import importlib
+
+# CRITICAL: add this script's folder to Python path otherwise Fusion can't
+# find the other modules when they are imported
+THIS_DIR = os.path.dirname(os.path.abspath(__file__))
+if THIS_DIR not in sys.path:
+    sys.path.insert(0, THIS_DIR)
 
 import ui_builder
 import generator
@@ -31,6 +31,7 @@ def run(context):
 
         ui_builder.register_command(ui, _handlers, generator)
 
+        # Keep script alive so command events (execute/destroy) can fire reliably
         adsk.autoTerminate(False)
 
     except:
@@ -39,8 +40,7 @@ def run(context):
 
 
 def stop(context):
-    # Optional: Fusion calls stop() for Add-Ins; scripts typically don't need it.
-    # Leaving it here doesn't hurt and can help if you later convert to an Add-In.
+    # Optional: provides a clean shutdown path
     try:
         adsk.terminate()
     except:
