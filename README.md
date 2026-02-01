@@ -9,11 +9,6 @@ This ensures continuity, smooth transitions, and a composed look across the enti
 
 ---
 
-### Sample
-<video playsinline muted loop controls height="540" width="540">
-  <source src="./samples/sample-wall.mp4" type="video/mp4">
-  Your browser does not support the video tag.
-</video>
 
 ## Table of Contents
 
