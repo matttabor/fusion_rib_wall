@@ -1,35 +1,34 @@
 # geometry.py
 #
-# OrganicFlowRibs (Axis-Fix: X=thickness/stack, Y=height (48"), Z=wave)
-# --------------------------------------------------------------------
-# Based on your latest "orientation is wrong", this version uses the most
-# common Fusion interpretation for your screenshots:
+# OrganicFlowRibs (Legacy-Stable + Explicit Orientation)
+# -----------------------------------------------------
+# This file is a merge-safe, single-source-of-truth geometry module based on the
+# original working single-file generator (wavy.py), ported into the split project.
 #
-#   - X : rib THICKNESS direction AND stack direction (thickness + gap)
-#   - Y : rib HEIGHT (vertical), default 48"
-#   - Z : RELIEF / wave depth (varies), back plane at Z=0
+# Goal: preserve the legacy output you approved (waves/feel/tabs/spacing) while
+# making the final orientation deterministic (no more "Fusion did something weird").
 #
-# Side section view (looking along +X or -X):
-#   - Back of rib is a straight line at Z=0
-#   - Only the FRONT varies: Z = f(ribIndex, Y) and is clamped >= 0
-#   - Ends are flat at Y=0 and Y=rib_length_in
+# IMPORTANT: We intentionally preserve the legacy coordinate quirk that produces
+# the desired look:
+#   - Sketch is created on the XZ construction plane
+#   - But spline points are emitted as (x, z, 0)
+# Fusion tolerates this and it matches the legacy result.
 #
-# Construction:
-#   1) Build CLOSED profile in the YZ plane:
-#        - back edge: Z=0 from Y=0..rib_length_in
-#        - front edge: fitted spline through (Y, Z(Y))
-#        - close with flat top/bottom edges
-#   2) Extrude along +X by rib_thickness_in (0.75")
-#   3) Stack along +X by pitch = rib_thickness_in + gap_between_ribs_in
-#
-# Tabs/notches: intentionally disabled until the core orientation is locked.
+# If/when we do "Stage 2 normalization", we can remove that quirk safely.
 
 import adsk.core
 import adsk.fusion
 import math
 import random
 
-from util import cm, smooth_series
+from util import cm
+
+# Keep this TRUE to match the legacy look.
+LEGACY_POINT_QUIRK = True
+
+# Explicit orientation control (you found flipping to -1 was the key).
+# If you ever need to flip the final orientation, change this to +1.
+ORIENT_SIGN = -1  # <- keep -1
 
 
 def generate_flow_ribs(
@@ -66,152 +65,211 @@ def generate_flow_ribs(
     tab_height_in: float,
     tab_centers_in
 ):
-    app = adsk.core.Application.get()
-    ui = app.userInterface
+    ui = adsk.core.Application.get().userInterface
 
-    progress = ui.createProgressDialog()
-    progress.isBackgroundTranslucent = False
-    progress.show("OrganicFlowRibs", "Generating rib %v of %m", 0, max(1, rib_count), 0)
+    # Defensive clamps (match legacy feel)
+    rib_count = max(1, int(rib_count))
+    samples = max(40, int(samples))
+    rib_length_in = max(0.01, float(rib_length_in))
+    rib_height_in = max(0.01, float(rib_height_in))
+    rib_thickness_in = max(0.01, float(rib_thickness_in))
+    gap_between_ribs_in = max(0.0, float(gap_between_ribs_in))
 
+    randomness = max(0.0, min(1.0, float(randomness)))
+    wildness = max(0.0, min(1.0, float(wildness)))
+    smoothness = max(0.0, min(1.0, float(smoothness)))
+
+    base_amp_in = min(float(base_amplitude_in), rib_height_in)
+    base_period_in = max(0.01, float(bend_scale_in))  # legacy "wavePeriod" equivalent
+    pitch_in = rib_thickness_in + gap_between_ribs_in
+
+    # Container component
     container_occ = root.occurrences.addNewComponent(adsk.core.Matrix3D.create())
     container_comp = container_occ.component
     container_comp.name = f"{name_prefix}{rib_count}x_seed{seed}"
-    rib_occs = container_comp.occurrences
+    occs = container_comp.occurrences
 
-    pitch_in = rib_thickness_in + gap_between_ribs_in
-    total_span_in = (rib_count - 1) * pitch_in if rib_count > 1 else 0.0
+    # Precompute tab spans along rib length
+    tab_spans = []
+    if add_tabs:
+        centers = tab_centers_in or []
+        for c in centers:
+            x0 = max(0.0, float(c) - tab_width_in / 2.0)
+            x1 = min(rib_length_in, float(c) + tab_width_in / 2.0)
+            if x1 > x0:
+                tab_spans.append((x0, x1))
+        tab_spans.sort(key=lambda t: t[0], reverse=True)
 
-    rng = random.Random(seed)
-    TAU = 2.0 * math.pi
+    # Master RNG (repeatability)
+    master = random.Random(int(seed))
 
-    # Flow-space rotation in (X,Y) domain: coherence across ribs (X) and along height (Y)
-    ca = math.cos(flow_angle_rad)
-    sa = math.sin(flow_angle_rad)
+    # Bulge profile across ribs (legacy topography feel)
+    if rib_count > 1:
+        center = (rib_count - 1) * (0.35 + 0.30 * master.random())
+    else:
+        center = 0.0
+    sigma = max(1.0, rib_count * (0.14 + 0.10 * master.random()))
 
-    def rot_u(x, y):
-        return x * ca + y * sa
+    # Coupling term that can sweep diagonally across ribs
+    diag_strength = (2.0 * math.pi) * (0.5 + 4.0 * wildness) * (0.25 + 0.75 * randomness)
 
-    def rot_v(x, y):
-        return -x * sa + y * ca
+    # End fade envelope (keep edges clean)
+    fade_power = 1.8 + 1.4 * smoothness
 
-    def end_env(y_in: float) -> float:
-        # Calm near ends (top/bottom)
-        if rib_length_in <= 0.0:
-            return 1.0
-        t = max(0.0, min(1.0, y_in / rib_length_in))
-        p = 1.6 + 0.9 * smoothness
-        return math.pow(math.sin(math.pi * t), p)
+    def envelope(x_in: float, rib_rng: random.Random) -> float:
+        shift = (rib_rng.uniform(-0.08, 0.08)) * (wildness * 0.7 + randomness * 0.3)
+        t = (x_in / rib_length_in) + shift
+        t = max(0.0, min(1.0, t))
+        return math.pow(math.sin(math.pi * t), fade_power)
 
-    scale_u = max(total_span_in + pitch_in, 0.001)
-    scale_v = max(rib_length_in, 0.001)
+    # Build per-rib params (amp drift + bulge)
+    rib_params = []
+    for i in range(rib_count):
+        rib_rng = random.Random(int(seed) + i * 10007)
 
-    base_period_u = max(bend_scale_in, scale_u * 0.6)
-    base_period_v = max(bend_scale_in, scale_v * 0.55)
+        amp_var = 0.25
+        per_var = 0.30
+        phase_jitter = 0.25
 
-    amp = max(0.0, base_amplitude_in) * (0.55 + 0.75 * randomness) * max(0.0, min(1.0, flow_strength))
-    amp = min(amp, max(0.001, rib_height_in))
+        Ai = base_amp_in * (1.0 + (amp_var * randomness) * rib_rng.uniform(-1.0, 1.0))
+        Pi = base_period_in * (1.0 + (per_var * randomness) * rib_rng.uniform(-1.0, 1.0))
+        Pi = max(3.0, Pi)
 
-    detail_mix = max(0.0, min(1.0, detail)) * (0.35 + 0.65 * wildness)
+        phi0 = rib_rng.uniform(0.0, 2.0 * math.pi) * (phase_jitter * randomness)
 
-    ph1 = rng.uniform(0.0, TAU)
-    ph2 = rng.uniform(0.0, TAU)
-    ph3 = rng.uniform(0.0, TAU)
+        bulge = 1.0
+        bulge_strength = 0.35
+        if rib_count > 1:
+            d = (i - center) / sigma
+            bulge = 1.0 + bulge_strength * randomness * math.exp(-(d * d))
 
-    def relief_z(x_pos_in: float, y_in: float) -> float:
-        u = rot_u(x_pos_in, y_in)
-        v = rot_v(x_pos_in, y_in)
+        rib_params.append((Ai, Pi, phi0, bulge))
 
-        s = 0.0
-        s += 0.90 * math.sin(TAU * (u / max(0.001, base_period_u)) + ph1)
-        s += 0.55 * math.sin(TAU * (v / max(0.001, base_period_v)) + ph2)
-
-        if detail_mix > 1e-6:
-            s += detail_mix * 0.45 * math.sin(TAU * (u / max(0.001, base_period_u * 0.45)) + ph3)
-
-        s *= 0.55
-        s *= end_env(y_in)
-        return amp * s
+    # Progress dialog
+    prog = ui.createProgressDialog()
+    prog.isBackgroundTranslucent = False
+    prog.show("OrganicFlowRibs", "Generating rib %v of %m", 0, max(1, rib_count), 0)
 
     try:
         for i in range(rib_count):
-            progress.progressValue = i + 1
+            prog.progressValue = i + 1
             adsk.doEvents()
 
-            rib_occ = rib_occs.addNewComponent(adsk.core.Matrix3D.create())
+            rib_occ = occs.addNewComponent(adsk.core.Matrix3D.create())
             rib_comp = rib_occ.component
             rib_comp.name = f"Rib_{i+1:02d}"
 
-            x_pos_in = i * pitch_in
-
-            # Profile in YZ plane (Y=height, Z=relief)
-            sketch = rib_comp.sketches.add(rib_comp.yZConstructionPlane)
-            curves = sketch.sketchCurves
+            # Sketch (legacy: XZ plane, points emitted as (x, z, 0))
+            sk = rib_comp.sketches.add(rib_comp.xZConstructionPlane)
+            curves = sk.sketchCurves
             lines = curves.sketchLines
             splines = curves.sketchFittedSplines
 
-            y_vals = []
-            z_vals = []
+            rib_rng = random.Random(int(seed) + i * 10007)
+            Ai, Pi, phi0, bulge = rib_params[i]
+
+            rib_t = 0.0 if rib_count == 1 else (i / (rib_count - 1))
+
+            fitPts = adsk.core.ObjectCollection.create()
             for s in range(samples + 1):
-                y_in = rib_length_in * (s / max(1, samples))
-                y_vals.append(y_in)
-                z_vals.append(relief_z(x_pos_in, y_in))
+                x_in = rib_length_in * s / samples
 
-            z_vals = smooth_series(z_vals, passes=smooth_passes)
+                env = envelope(x_in, rib_rng)
+                diag = diag_strength * (rib_t - 0.5) * (x_in / rib_length_in)
 
-            # Shift so min touches back plane Z=0
-            z_min = min(z_vals) if z_vals else 0.0
-            z_shifted = [(z - z_min) for z in z_vals]
-            z_final = [max(0.0, min(rib_height_in, z)) for z in z_shifted]
+                z_in = rib_height_in - (env * (Ai * bulge)) * math.sin((2.0 * math.pi * x_in / Pi) + phi0 + diag)
+                z_in = max(0.0, min(rib_height_in, z_in))
 
-            # Front spline: (Y, Z)
-            front_pts = adsk.core.ObjectCollection.create()
-            for y_in, z_in in zip(y_vals, z_final):
-                front_pts.add(adsk.core.Point3D.create(0, cm(y_in), cm(z_in)))
-            splines.add(front_pts)
+                # Legacy coordinate quirk:
+                fitPts.add(adsk.core.Point3D.create(cm(x_in), cm(z_in), 0))
 
-            # Close with flat top/bottom and flat back at Z=0
-            top_front = adsk.core.Point3D.create(0, cm(rib_length_in), cm(z_final[-1] if z_final else 0.0))
-            top_back  = adsk.core.Point3D.create(0, cm(rib_length_in), cm(0.0))
-            lines.addByTwoPoints(top_front, top_back)
+            splines.add(fitPts)
 
-            bot_back  = adsk.core.Point3D.create(0, cm(0.0), cm(0.0))
-            lines.addByTwoPoints(top_back, bot_back)
+            # Close profile down to baseline (with optional tabs to negative z)
+            x_right = rib_length_in
+            z_right_in = fitPts.item(fitPts.count - 1).y / 2.54  # y holds "z" in legacy quirk
 
-            bot_front = adsk.core.Point3D.create(0, cm(0.0), cm(z_final[0] if z_final else 0.0))
-            lines.addByTwoPoints(bot_back, bot_front)
+            lines.addByTwoPoints(
+                adsk.core.Point3D.create(cm(x_right), cm(z_right_in), 0),
+                adsk.core.Point3D.create(cm(x_right), cm(0.0), 0)
+            )
 
-            if sketch.profiles.count == 0:
-                ui.messageBox(
-                    f"Profile failed on rib {i+1}.\n\n"
-                    "Try:\n"
-                    "- Increase samples (200–400)\n"
-                    "- Increase smooth_passes (2–4)\n"
-                    "- Reduce detail/wildness/randomness"
-                )
+            cur_x = rib_length_in
+            baseline_z = 0.0
+            tab_bottom_z = -tab_height_in
+
+            def P(xi, zi):
+                return adsk.core.Point3D.create(cm(xi), cm(zi), 0)
+
+            p = P(cur_x, baseline_z)
+
+            if add_tabs and len(tab_spans) > 0:
+                for (t0, t1) in tab_spans:
+                    if cur_x > t1:
+                        p2 = P(t1, baseline_z)
+                        lines.addByTwoPoints(p, p2)
+                        p = p2
+                        cur_x = t1
+
+                    # Down
+                    p2 = P(cur_x, tab_bottom_z)
+                    lines.addByTwoPoints(p, p2)
+                    p = p2
+
+                    # Left
+                    p2 = P(t0, tab_bottom_z)
+                    lines.addByTwoPoints(p, p2)
+                    p = p2
+                    cur_x = t0
+
+                    # Up
+                    p2 = P(cur_x, baseline_z)
+                    lines.addByTwoPoints(p, p2)
+                    p = p2
+
+                if cur_x > 0.0:
+                    p2 = P(0.0, baseline_z)
+                    lines.addByTwoPoints(p, p2)
+                    p = p2
+                    cur_x = 0.0
+            else:
+                p2 = P(0.0, baseline_z)
+                lines.addByTwoPoints(p, p2)
+                p = p2
+                cur_x = 0.0
+
+            # Close back up to curve start
+            z_left_in = fitPts.item(0).y / 2.54
+            lines.addByTwoPoints(P(0.0, baseline_z), P(0.0, z_left_in))
+
+            if sk.profiles.count == 0:
+                ui.messageBox(f"Profile failed on rib {i+1}. Try lowering amplitude or tab height.")
                 return
 
-            prof = sketch.profiles.item(0)
+            prof = sk.profiles.item(0)
 
-            # Extrude along +X by thickness
-            extrudes = rib_comp.features.extrudeFeatures
-            ext_in = extrudes.createInput(prof, adsk.fusion.FeatureOperations.NewBodyFeatureOperation)
-            ext_in.setDistanceExtent(False, adsk.core.ValueInput.createByString(f"{rib_thickness_in} in"))
-            extrudes.add(ext_in)
+            # Extrude thickness along +Y (legacy behavior)
+            ext = rib_comp.features.extrudeFeatures
+            ei = ext.createInput(prof, adsk.fusion.FeatureOperations.NewBodyFeatureOperation)
+            ei.setDistanceExtent(False, adsk.core.ValueInput.createByString(f"{rib_thickness_in} in"))
+            ext.add(ei)
 
-            # Stack along +X (thickness + gap)
+            # Place rib occurrences (legacy behavior)
             m = adsk.core.Matrix3D.create()
-            m.translation = adsk.core.Vector3D.create(cm(x_pos_in), 0, 0)
+            if layout_along_y:
+                m.translation = adsk.core.Vector3D.create(0, cm(i * pitch_in), 0)
+            else:
+                m.translation = adsk.core.Vector3D.create(cm(i * pitch_in), 0, 0)
             rib_occ.transform = m
 
-    finally:
-        progress.hide()
+        # Deterministic final orientation (matches your "flip to -1" fix)
+        rot = adsk.core.Matrix3D.create()
+        rot.setToRotation(
+            ORIENT_SIGN * (math.pi / 2),
+            adsk.core.Vector3D.create(0, -1, 0),   # rotate about Y
+            adsk.core.Point3D.create(0, 0, 0)
+        )
+        container_occ.transform = rot
 
-    ui.messageBox(
-        "Generated ribs with axis fix.\n\n"
-        f"Ribs: {rib_count}\n"
-        f"Height (Y): {rib_length_in} in\n"
-        f"Thickness (X extrude): {rib_thickness_in} in\n"
-        f"Gap between ribs: {gap_between_ribs_in} in\n"
-        f"Max relief depth (Z): {rib_height_in} in\n"
-        "Back plane: Z=0 (flat). Only front face varies."
-    )
+    finally:
+        prog.hide()

@@ -6,6 +6,7 @@ import math
 import adsk.core
 import adsk.fusion
 import traceback
+import importlib
 
 import geometry
 from util import delete_containers_with_prefix
@@ -97,6 +98,9 @@ def execute(args):
         delete_containers_with_prefix(root, name_prefix)
         
         # Call into geometry.py
+
+        importlib.reload(geometry)
+
         # IMPORTANT: your geometry.py needs to provide a function with this signature.
         # If your function name differs, we'll adjust after you paste geometry.py.
         geometry.generate_flow_ribs(
