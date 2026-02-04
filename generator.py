@@ -1,13 +1,14 @@
 # generator.py
 # Reads dialog inputs and generates the model by calling geometry.py
 
+from logging import root
 import math
 import adsk.core
 import adsk.fusion
 import traceback
 
 import geometry
-
+from util import delete_containers_with_prefix
 
 def _val_in(inputs, input_id: str) -> float:
     """
@@ -91,6 +92,10 @@ def execute(args):
 
         flow_angle_deg = float(inputs.itemById("flowAngleDeg").value)
         flow_angle_rad = math.radians(flow_angle_deg)
+        
+
+        delete_containers_with_prefix(root, name_prefix)
+        
         # Call into geometry.py
         # IMPORTANT: your geometry.py needs to provide a function with this signature.
         # If your function name differs, we'll adjust after you paste geometry.py.
