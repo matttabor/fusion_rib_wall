@@ -28,7 +28,12 @@ LEGACY_POINT_QUIRK = True
 
 # Explicit orientation control (you found flipping to -1 was the key).
 # If you ever need to flip the final orientation, change this to +1.
-ORIENT_SIGN = -1  # <- keep -1
+ORIENT_SIGN = -1 
+ORIENT_AXIS = 'Y'   # 'X', 'Y', or 'Z'
+ORIENT_DEG  = -90   # degrees
+
+ORIENT2_AXIS = 'Z'  # optional
+ORIENT2_DEG  = 0    # set to 180 to flip, etc
 
 
 def generate_flow_ribs(
@@ -262,7 +267,6 @@ def generate_flow_ribs(
                 m.translation = adsk.core.Vector3D.create(cm(i * pitch_in), 0, 0)
             rib_occ.transform = m
 
-        # Deterministic final orientation (matches your "flip to -1" fix)
         rot = adsk.core.Matrix3D.create()
         rot.setToRotation(
             ORIENT_SIGN * (math.pi / 2),
