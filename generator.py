@@ -1,12 +1,20 @@
 # generator.py
 # Reads dialog inputs and generates the model by calling geometry.py
 
+from logging import root
 import math
 import adsk.core
 import adsk.fusion
 import traceback
+import importlib
 
 import geometry
+from backer_panel import backer
+from wall import wall
+from util import delete_containers_with_prefix
+from util import _delete_old_runs
+importlib.reload(backer)
+importlib.reload(wall)
 
 
 def _val_in(inputs, input_id: str) -> float:
@@ -88,10 +96,19 @@ def execute(args):
 
         root = _get_root_component()
         name_prefix = "OrganicFlowRibs_"
-
+        if delete_old:
+            delete_containers_with_prefix(root, name_prefix)
+            _delete_old_runs(root, name_prefix)
         flow_angle_deg = float(inputs.itemById("flowAngleDeg").value)
         flow_angle_rad = math.radians(flow_angle_deg)
+        
+
+        delete_containers_with_prefix(root, name_prefix)
+        
         # Call into geometry.py
+
+        importlib.reload(geometry)
+
         # IMPORTANT: your geometry.py needs to provide a function with this signature.
         # If your function name differs, we'll adjust after you paste geometry.py.
         geometry.generate_flow_ribs(
@@ -129,6 +146,33 @@ def execute(args):
             tab_centers_in=tab_centers_in
         )
 
+        container_occ = root.occurrences.item(root.occurrences.count - 1)
+        container_comp = container_occ.component
+
+        backer.build_backer_panel(
+            container_comp,
+            rib_count=rib_count,
+            rib_length_in=rib_length_in,
+            rib_thickness_in=rib_thickness_in,
+            gap_between_ribs_in=gap_between_ribs_in,
+            layout_along_y=layout_along_y,
+            add_tabs=add_tabs,
+            tab_width_in=tab_width_in,
+            tab_height_in=tab_height_in,
+            tab_centers_in=tab_centers_in,
+            backer_thickness_in=0.75,
+            backer_tab_clearance_in=0.03,
+            backer_margin_in=2.0,
+        )
+
+        wall.build_wall(
+            container_comp,
+            wall_width_in=96.0,
+            wall_height_in=96.0,
+            wall_thickness_in=4.0,
+            mount_height_in=24.0,
+            wall_offset_in=-1.0,
+        )
     except:
         if ui:
             ui.messageBox("Generator failed:\n" + traceback.format_exc())

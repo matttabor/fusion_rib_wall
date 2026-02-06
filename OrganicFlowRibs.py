@@ -1,6 +1,5 @@
 # OrganicFlowRibs.py
 # Entry point for Fusion 360 Script
-
 import adsk.core
 import traceback
 import os
@@ -10,8 +9,12 @@ import importlib
 # CRITICAL: add this script's folder to Python path otherwise Fusion can't
 # find the other modules when they are imported
 THIS_DIR = os.path.dirname(os.path.abspath(__file__))
+SRC_DIR = os.path.join(THIS_DIR, "src")
 if THIS_DIR not in sys.path:
     sys.path.insert(0, THIS_DIR)
+
+if SRC_DIR not in sys.path:
+    sys.path.insert(0, SRC_DIR)
 
 import ui_builder
 import generator
