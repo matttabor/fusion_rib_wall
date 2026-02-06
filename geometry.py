@@ -93,6 +93,7 @@ def generate_flow_ribs(
     container_comp = container_occ.component
     container_comp.name = f"{name_prefix}{rib_count}x_seed{seed}"
     occs = container_comp.occurrences
+    rib_occs = []  # track rib occurrences so we can apply final orientation per-rib
 
     # Precompute tab spans along rib length
     tab_spans = []
@@ -161,6 +162,7 @@ def generate_flow_ribs(
             adsk.doEvents()
 
             rib_occ = occs.addNewComponent(adsk.core.Matrix3D.create())
+            rib_occs.append(rib_occ)
             rib_comp = rib_occ.component
             rib_comp.name = f"Rib_{i+1:02d}"
 
@@ -258,7 +260,7 @@ def generate_flow_ribs(
             ei = ext.createInput(prof, adsk.fusion.FeatureOperations.NewBodyFeatureOperation)
             ei.setDistanceExtent(False, adsk.core.ValueInput.createByString(f"{rib_thickness_in} in"))
             ext.add(ei)
-
+    
             # Place rib occurrences (legacy behavior)
             m = adsk.core.Matrix3D.create()
             if layout_along_y:
@@ -267,13 +269,22 @@ def generate_flow_ribs(
                 m.translation = adsk.core.Vector3D.create(cm(i * pitch_in), 0, 0)
             rib_occ.transform = m
 
-        rot = adsk.core.Matrix3D.create()
-        rot.setToRotation(
-            ORIENT_SIGN * (math.pi / 2),
-            adsk.core.Vector3D.create(0, -1, 0),   # rotate about Y
-            adsk.core.Point3D.create(0, 0, 0)
-        )
-        container_occ.transform = rot
+        # Final orientation: rotate EACH rib occurrence in-place (about its own pivot).
+        # This avoids edge cases where the container transform doesn't affect the first rib.
+        axis = adsk.core.Vector3D.create(0, 1, 0)
+        for ro in rib_occs:
+           
+            t = ro.transform.translation
+            pivot = adsk.core.Point3D.create(t.x, t.y, t.z)
+            rot = adsk.core.Matrix3D.create()
+            rot.setToRotation(
+                ORIENT_SIGN * (math.pi / 2),
+                axis,
+                pivot
+            )
+            cur = ro.transform.copy()
+            cur.transformBy(rot)
+            ro.transform = cur
 
     finally:
         prog.hide()

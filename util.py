@@ -145,3 +145,15 @@ def build_tab_spans(tab_centers_in, tab_width_in, rib_length_in):
 
     spans.sort(key=lambda t: t[0], reverse=True)
     return spans
+
+def _delete_old_runs(root, prefix: str):
+    to_delete = []
+    for i in range(root.occurrences.count):
+        occ = root.occurrences.item(i)
+        if occ and occ.component and occ.component.name.startswith(prefix):
+            to_delete.append(occ)
+    for occ in reversed(to_delete):
+        try:
+            occ.deleteMe()
+        except:
+            pass
